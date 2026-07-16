@@ -1,0 +1,75 @@
+const DEFAULT_INPUT = `アシックス\nトヨタ\n任天堂\nキーエンス\nメルカリ\nスマートHR\nサントリー\nタイミー\nヤマト運輸\nソニー`;
+
+export default function App() {
+  const [inputText, setInputText] = useState(DEFAULT_INPUT);
+  const [results, setResults] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [apiError, setApiError] = useState(null);
+
+  // 通知用タイマー
+  useEffect(() => {
+    if (copied) {
+      const timer = setTimeout(() => setCopied(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [copied]);
+
+  // 高速化：ローカルキャッシュの事前チェック ＆ 必要分のみGemini APIを叩くハイブリッド検証
+  const handleVerify = async () => {
+    const lines = inputText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+
+    setIsProcessing(true);
+    setApiError(null);
+
+    const initialResults = [];
+    const pendingLines = [];
+
+    // 1. 各企業をまずローカルキャッシュでチェック
+    lines.forEach((line, index) => {
+      const normalizedLine = line.toLowerCase().replace(/\s+/g, '');
+      
+      // キャッシュキーの完全一致または前方/後方部分一致を判定
+      let cacheHit = null;
+      for (const [key, val] of Object.entries(LOCAL_CACHE)) {
+        if (normalizedLine === key || normalizedLine.includes(key) || key.includes(normalizedLine)) {
+          cacheHit = val;
+          break;
+        }
+      }
+
+      if (cacheHit) {
+        // キャッシュにヒット：即座に「確定」ステータスで突っ込む
+        initialResults.push({
+          id: index,
+          original: line,
+          formal: cacheHit.formal,
+          type: cacheHit.type,
+          reason: cacheHit.reason,
+          status: 'complete', // 即座にローディングを終了
+          source: 'local'
+        });
+      } else {
+        // キャッシュにない：一旦「AI判定中」として仮置きし、APIに回す
+        initialResults.push({
+          id: index,
+          original: line,
+          formal: '解析中...',
+          type: 'none',
+          reason: 'バックグラウンドで高精度AIが登記情報を確認しています...',
+          status: 'processing', // ローディングを表示
+          source: 'api'
+        });
+        pendingLines.push({ index, line });
+      }
+    });
+
+    // 最初にローカル結果（確定＋ローディング中）を即時表示（これで体感速度0秒！）
+    setResults(initialResults);
+
+    // 全てがローカルキャッシュにヒットした場合は、APIを叩かずに即終了
+    if (pendingLines.length === 0) {
+      setIsProcessing(false);
+      return;
+    }
